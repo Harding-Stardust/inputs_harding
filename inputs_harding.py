@@ -8,7 +8,7 @@
 # https://github.com/kujan/NGU-scripts/blob/871c25249a3331a5fa3afeca7acbd880222a0dbf/classes/inputs.py#L124C14-L124C14 That cant be correct... Without the up event, the game thinks the user is still holding those buttons down
 # https://github.com/kujan/NGU-scripts/blob/871c25249a3331a5fa3afeca7acbd880222a0dbf/classes/inputs.py#L349 WTF, this is a simple s.replace(' ', '')
 """
-Module for handling keyboard presses and mouse movement+clicks on Windows.
+Module for handling keyboard presses and mouse movement and mouse clicks on Windows.
 Use the module https://github.com/boppreh/keyboard whenever you can.
 However, there is a bug in that module, see
 https://github.com/boppreh/keyboard/blob/master/keyboard/_winkeyboard.py#L11
@@ -37,7 +37,7 @@ import time
 import re
 import ctypes
 from ctypes import wintypes
-from typing import Tuple, List, Union, Set
+from typing import Tuple, List, Union, Set, Optional
 import logging as _logging
 _g_logger = _logging.getLogger(__name__)
 # _g_logger.setLevel(_logging.DEBUG) # This is the level that is actually used. In production, set this to logging.INFO
@@ -51,6 +51,7 @@ _g_logger.addHandler(_console_handler)
 import win32gui as _win32gui
 import win32con as _win32con
 import win32api as _win32api
+from typeguard import typechecked
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 
@@ -277,7 +278,7 @@ def create_LPARAM_KeyDown(arg_virtual_key: virtual_key_type, RepeatCount: int = 
 def create_LPARAM_KeyUp(arg_virtual_key: virtual_key_type) -> int:
     return create_LPARAM_KeyUpDown(arg_virtual_key, RepeatCount=1, TransitionState=True, PreviousKeyState=True, ContextCode=False)
 
-def list_from_str(arg_str: Union[str, List, Set, Tuple, None],
+def _list_from_str(arg_str: Union[str, List, Set, Tuple, None],
                   arg_re_splitter: str = ' |,|;|:|[+]|[-]|[|]|[\n]|[\r]'
                   ) -> List[str]:
     ''' Take a str and try to convert into a list of str in a smart way.
@@ -299,20 +300,42 @@ def list_from_str(arg_str: Union[str, List, Set, Tuple, None],
     return res
 
 # Public functions ------------------------------------------------------------------------------------------------------------------
+@typechecked
+def mouse_get_position() -> Optional[mouse_position_type]:
+    ''' Returns the mouse position as a tuple (x, y) where (0, 0) is the top left of the screen
 
-def mouse_get_position() -> mouse_position_type:
-    ''' Returns the mouse position as a tuple (x, y) where (0, 0) is the top left of the screen '''
-    return _win32gui.GetCursorPos()
+    Can throw pywintypes.error: (5, 'GetCursorPos', 'Access is denied.')
+    From my limited tests, this can happen if the system has been put into screensaver mode or if the secure desktop is showing.
 
-def find_window(arg_class_name: Union[str, None] = None, arg_title: Union[str, None] = None) -> HWND:
+    '''
+    res = None
+    try:
+        res  = _win32gui.GetCursorPos()
+    except exc:
+        # If the screen saver is running, the exception can be thrown
+        _g_logger.error('_win32gui.GetCursorPos got an exception: {exc}')
+
+    return res
+
+@typechecked
+def find_window(arg_class_name: Optional[str] = None, arg_title: Optional[str] = None) -> HWND:
     ''' Get the HWND to the window matching the class name or title.
         For more info see: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-findwindowa '''
-    return _win32gui.FindWindow(arg_class_name, arg_title)
+    return _win32gui.FindWindow(arg_class_name, arg_title) # TODO: Can this also throw exception as win32gui.GetCursorPos() ?
 
+@typechecked
+def is_window(arg_hwnd: HWND) -> bool:
+    ''' Determines whether the specified window handle identifies an existing window.
+    https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindow '''
+
+    return _win32gui.IsWindow(arg_hwnd) == 1
+
+@typechecked
 def window_from_point(arg_pos: mouse_position_type) -> HWND:
-    ''' Get the HWND from the given position'''
-    return _win32gui.WindowFromPoint(arg_pos)
+    ''' Get the HWND from the given position '''
+    return _win32gui.WindowFromPoint(arg_pos) # TODO: Can this also throw exception as win32gui.GetCursorPos() ?
 
+@typechecked
 def virtual_key(arg_virtual_key: virtual_key_type, arg_debug: bool = False) -> int:
     ''' Try to convert whatever comes in to a virtual key code '''
     if isinstance(arg_virtual_key, str):
@@ -324,16 +347,19 @@ def virtual_key(arg_virtual_key: virtual_key_type, arg_debug: bool = False) -> i
         _g_logger.debug(f"returned 0x{arg_virtual_key:x}")
     return arg_virtual_key
 
+@typechecked
 def key_down_SendInput(arg_virtual_key_code: virtual_key_type, arg_debug: bool = False):
     ''' Send the event that press down a key. You need to manually call key_up_SendInput() to release the key '''
     x = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=virtual_key(arg_virtual_key_code)))
     user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
 
+@typechecked
 def key_up_SendInput(arg_virtual_key_code: virtual_key_type):
     ''' Send the event that release a key. You need to manually call key_down_SendInput() before to press down the key '''
     x = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=virtual_key(arg_virtual_key_code), dwFlags=KEYEVENTF_KEYUP))
     user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
 
+@typechecked
 def key_hold_SendInput(arg_virtual_key_code: virtual_key_type, arg_hold_down_for_in_seconds: float = 0.050):
     ''' Press down a key, wait 'arg_hold_down_for_in_seconds' seconds then release the key. If no 'arg_hold_down_for_in_seconds' is given, holds down for 50 ms '''
     key_down_SendInput(arg_virtual_key_code)
@@ -341,6 +367,7 @@ def key_hold_SendInput(arg_virtual_key_code: virtual_key_type, arg_hold_down_for
     key_up_SendInput(arg_virtual_key_code)
 
 # These functions do NOT need the application to have focus ---------------------------------------------------------------------------------
+@typechecked
 def mouse_SendMessage(arg_hwnd: HWND,
                       arg_pos: mouse_position_type,
                       arg_direction_is_down: bool = True,
@@ -363,6 +390,7 @@ def mouse_SendMessage(arg_hwnd: HWND,
     # TODO: Thats a good idea I think but I have to meditate on it further
     _win32api.SendMessage(arg_hwnd, _WM, _MK, _lparam) # TODO: mypy say: 'error: Argument 3 to "SendMessage" has incompatible type "int"; expected "Optional[str]"  [arg-type]' but thats gotta be wrong?
 
+@typechecked
 def key_down_SendMessage(arg_hwnd: HWND,
                          arg_virtual_key: virtual_key_type,
                          arg_debug: bool = False):
@@ -373,6 +401,7 @@ def key_down_SendMessage(arg_hwnd: HWND,
         _g_logger.debug(f"Got arg_virtual_key: {arg_virtual_key} with type: {type(arg_virtual_key)} --> virtual_key(): 0x{_vk:x}")
     _win32api.SendMessage(arg_hwnd, _win32con.WM_KEYDOWN, _vk, create_LPARAM_KeyDown(_vk))
 
+@typechecked
 def key_up_SendMessage(arg_hwnd: HWND,
                        arg_virtual_key: virtual_key_type,
                        arg_debug: bool = False):
@@ -382,6 +411,7 @@ def key_up_SendMessage(arg_hwnd: HWND,
         _g_logger.debug(f"Got arg_virtual_key: {arg_virtual_key} with type: {type(arg_virtual_key)} --> virtual_key(): 0x{_vk:x}")
     _win32api.SendMessage(arg_hwnd, _win32con.WM_KEYUP, _vk, create_LPARAM_KeyUp(_vk))
 
+@typechecked
 def key_hold_SendMessage(arg_hwnd: HWND,
                          arg_virtual_key: Union[virtual_key_type, List[str]],
                          arg_hold_down_for_in_seconds: float = 0.050,
@@ -395,7 +425,7 @@ def key_hold_SendMessage(arg_hwnd: HWND,
         time.sleep(arg_hold_down_for_in_seconds)
         key_up_SendMessage(arg_hwnd=arg_hwnd, arg_virtual_key=arg_virtual_key, arg_debug=arg_debug)
     else:
-        _keys = list_from_str(arg_virtual_key) # This can handle strings like "control + S" --> hold down control and press S
+        _keys = _list_from_str(arg_virtual_key) # This can handle strings like "control + S" --> hold down control and press S
         if not _keys:
             _g_logger.error("_keys is empty")
             return False
@@ -414,6 +444,7 @@ def key_hold_SendMessage(arg_hwnd: HWND,
             _g_logger.debug(f"Releasing key: {_key}")
     return True
 
+@typechecked
 def key_type_message_SendMessage(arg_hwnd: HWND,
                                  arg_message: key_type,
                                  arg_seconds_between_keys: float = 0.050,
@@ -430,18 +461,21 @@ def key_type_message_SendMessage(arg_hwnd: HWND,
         time.sleep(arg_seconds_between_keys)
     return res
 
+@typechecked
 def mouse_left_down_SendMessage(arg_hwnd: HWND,
                                 arg_pos: mouse_position_type,
                                 arg_move_mouse: bool = True,
                                 arg_debug: bool = False):
     mouse_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_direction_is_down=True, arg_mouse_button_is_left=True, arg_move_mouse=arg_move_mouse, arg_debug=arg_debug)
 
+@typechecked
 def mouse_left_up_SendMessage(arg_hwnd: HWND,
                               arg_pos: mouse_position_type,
                               arg_move_mouse: bool = True,
                               arg_debug: bool = False):
     mouse_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_direction_is_down=False, arg_mouse_button_is_left=True, arg_move_mouse=arg_move_mouse, arg_debug=arg_debug)
 
+@typechecked
 def mouse_left_click_SendMessage(arg_hwnd: HWND,
                                  arg_pos: mouse_position_type,
                                  arg_move_mouse: bool = True,
@@ -450,6 +484,7 @@ def mouse_left_click_SendMessage(arg_hwnd: HWND,
     mouse_left_down_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_move_mouse=arg_move_mouse, arg_debug=arg_debug)
     mouse_left_up_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_move_mouse=arg_move_mouse, arg_debug=arg_debug)
 
+@typechecked
 def mouse_left_doubleclick_SendMessage(arg_hwnd: HWND,
                                        arg_pos: mouse_position_type,
                                        arg_move_mouse: bool = True,
@@ -475,18 +510,21 @@ def mouse_left_doubleclick_SendMessage(arg_hwnd: HWND,
     _win32api.SendMessage(arg_hwnd, _win32con.WM_LBUTTONDBLCLK, _win32con.MK_LBUTTON, _lparam)
     _win32api.SendMessage(arg_hwnd, _win32con.WM_LBUTTONUP, _win32con.MK_LBUTTON, _lparam)
 
+@typechecked
 def mouse_right_down_SendMessage(arg_hwnd: HWND,
                                  arg_pos: mouse_position_type,
                                  arg_move_mouse: bool = True,
                                  arg_debug: bool = False):
     mouse_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_direction_is_down=True, arg_mouse_button_is_left=False, arg_move_mouse=arg_move_mouse, arg_debug=arg_debug)
 
+@typechecked
 def mouse_right_up_SendMessage(arg_hwnd: HWND,
                                arg_pos: mouse_position_type,
                                arg_move_mouse: bool = True,
                                arg_debug: bool = False):
     mouse_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_direction_is_down=False, arg_mouse_button_is_left=False, arg_move_mouse=arg_move_mouse, arg_debug=arg_debug)
 
+@typechecked
 def mouse_right_click_SendMessage(arg_hwnd: HWND,
                                   arg_pos: mouse_position_type,
                                   arg_move_mouse: bool = True,
@@ -494,6 +532,7 @@ def mouse_right_click_SendMessage(arg_hwnd: HWND,
     mouse_right_down_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_move_mouse=arg_move_mouse)
     mouse_right_up_SendMessage(arg_hwnd=arg_hwnd, arg_pos=arg_pos, arg_move_mouse=arg_move_mouse)
 
+@typechecked
 def mouse_move_SendMessage(arg_hwnd: HWND,
                            arg_pos: mouse_position_type,
                            arg_debug: bool = False):
@@ -503,6 +542,7 @@ def mouse_move_SendMessage(arg_hwnd: HWND,
     _win32gui.SendMessage(arg_hwnd, _win32con.WM_ACTIVATE, _win32con.WA_ACTIVE, 0)
     _win32api.SendMessage(arg_hwnd, _win32con.WM_MOUSEMOVE, 0, _lparam)
 
+@typechecked
 def mouse_left_drag_and_drop_SendMessage(arg_hwnd: HWND,
                                          arg_from_pos: mouse_position_type,
                                          arg_to_pos: mouse_position_type,
