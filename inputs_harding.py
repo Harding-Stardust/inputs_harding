@@ -21,7 +21,9 @@ This module can also send key preses as window messages via SendMessage.
 If you use the SendMessage, then the application do NOT need to have focus
 """
 
-__version__ = 230704153633
+STRICT_TYPES = True # If you want to have stict type checking: pip install typeguard
+
+__version__ = 240208_225310
 __author__ = "Harding"
 __description__ = __doc__
 __copyright__ = "Copyright 2023"
@@ -32,12 +34,11 @@ __maintainer__ = "Harding"
 __email__ = "not.at.the.moment@example.com"
 __status__ = "Development"
 
-
 import time as _time
 import re as _re
 import ctypes as _ctypes
 from ctypes import wintypes as _wintypes
-from typing import Tuple, List, Union, Set, Optional
+from typing import Tuple, List, Union, Set, Optional, TypeVar
 import logging as _logging
 _g_logger = _logging.getLogger(__name__)
 # _g_logger.setLevel(_logging.DEBUG) # This is the level that is actually used. In production, set this to logging.INFO
@@ -51,7 +52,15 @@ _g_logger.addHandler(_console_handler)
 import win32gui as _win32gui
 import win32con as _win32con
 import win32api as _win32api
-from typeguard import typechecked
+try:
+    if not STRICT_TYPES:
+        raise ImportError("Skipping the import of typeguard reason: STRICT_TYPES == False")
+    from typeguard import typechecked
+except:
+    STRICT_TYPES = False
+    _T = TypeVar("_T")
+    def typechecked(target: _T, **kwargs) -> _T: # type: ignore
+        return target if target else typechecked # type: ignore
 
 _user32 = _ctypes.WinDLL('user32', use_last_error=True)
 
@@ -211,7 +220,7 @@ key_type = Union[virtual_key_type, List[str]]
 mouse_position_type = Tuple[int, int] # (0,0) is the top left corner
 
 # C struct definitions
-_wintypes.ULONG_PTR = _wintypes.WPARAM
+ULONG_PTR = _wintypes.WPARAM
 
 class _MOUSEINPUT(_ctypes.Structure):
     _fields_ = (("dx",          _wintypes.LONG),
@@ -219,14 +228,14 @@ class _MOUSEINPUT(_ctypes.Structure):
                 ("mouseData",   _wintypes.DWORD),
                 ("dwFlags",     _wintypes.DWORD),
                 ("time",        _wintypes.DWORD),
-                ("dwExtraInfo", _wintypes.ULONG_PTR))
+                ("dwExtraInfo", ULONG_PTR))
 
 class _KEYBDINPUT(_ctypes.Structure):
     _fields_ = (("wVk",         _wintypes.WORD),
                 ("wScan",       _wintypes.WORD),
                 ("dwFlags",     _wintypes.DWORD),
                 ("time",        _wintypes.DWORD),
-                ("dwExtraInfo", _wintypes.ULONG_PTR))
+                ("dwExtraInfo", ULONG_PTR))
 
     def __init__(self, *args, **kwds):
         super(_KEYBDINPUT, self).__init__(*args, **kwds)
@@ -340,10 +349,9 @@ def window_from_point(arg_pos: mouse_position_type) -> _HWND:
 def window_text(arg_HWND: _HWND) -> Optional[str]:
     ''' Calls GetWindowText on the window. Can be used to get the window title '''
     if not is_window(arg_HWND):
-        _g_logger.error(f"arg_HWND: 0x{arg_HWND} does not exist.")
+        _g_logger.error(f"arg_HWND: 0x{arg_HWND:x} does not exist.")
         return None
     return _win32gui.GetWindowText(arg_HWND) # pylint: disable=c-extension-no-member
-
 
 @typechecked
 def virtual_key(arg_virtual_key: virtual_key_type, arg_debug: bool = False) -> int:
@@ -407,10 +415,10 @@ def _mouse_SendMessage(arg_HWND: _HWND,
     _lparam = _win32api.MAKELONG(client_pos[0], client_pos[1]) # pylint: disable=c-extension-no-member
     _win32gui.SendMessage(arg_HWND, _win32con.WM_ACTIVATE, _win32con.WA_ACTIVE, 0) # TODO: Is it a problem that I send many WM_ACTIVATE? # pylint: disable=c-extension-no-member
     if arg_move_mouse: # Some programs don't work well if we don't have the mouse in the correct position
-        _win32api.SendMessage(arg_HWND, _win32con.WM_MOUSEMOVE, None, _lparam) # pylint: disable=c-extension-no-member
+        _win32gui.SendMessage(arg_HWND, _win32con.WM_MOUSEMOVE, None, _lparam) # pylint: disable=c-extension-no-member
     # TODO: Kujan have checks for if the user holds down a modifier key like CTRL and waits until that is released.
     # TODO: Thats a good idea I think but I have to meditate on it further
-    _win32api.SendMessage(arg_HWND, _WM, _MK, _lparam) # TODO: mypy say: 'error: Argument 3 to "SendMessage" has incompatible type "int"; expected "Optional[str]"  [arg-type]' but thats gotta be wrong? # pylint: disable=c-extension-no-member
+    _win32gui.SendMessage(arg_HWND, _WM, _MK, _lparam) # pylint: disable=c-extension-no-member
 
 @typechecked
 def key_down_SendMessage(arg_HWND: _HWND,
@@ -421,7 +429,7 @@ def key_down_SendMessage(arg_HWND: _HWND,
     _vk = virtual_key(arg_virtual_key, arg_debug=arg_debug)
     if arg_debug:
         _g_logger.debug(f"Got arg_virtual_key: {arg_virtual_key} with type: {type(arg_virtual_key)} --> virtual_key(): 0x{_vk:x}")
-    _win32api.SendMessage(arg_HWND, _win32con.WM_KEYDOWN, _vk, _create_LPARAM_KeyDown(_vk)) # pylint: disable=c-extension-no-member
+    _win32gui.SendMessage(arg_HWND, _win32con.WM_KEYDOWN, _vk, _create_LPARAM_KeyDown(_vk)) # pylint: disable=c-extension-no-member
 
 @typechecked
 def key_up_SendMessage(arg_HWND: _HWND,
@@ -431,7 +439,7 @@ def key_up_SendMessage(arg_HWND: _HWND,
     _vk = virtual_key(arg_virtual_key, arg_debug=arg_debug)
     if arg_debug:
         _g_logger.debug(f"Got arg_virtual_key: {arg_virtual_key} with type: {type(arg_virtual_key)} --> virtual_key(): 0x{_vk:x}")
-    _win32api.SendMessage(arg_HWND, _win32con.WM_KEYUP, _vk, _create_LPARAM_KeyUp(_vk)) # pylint: disable=c-extension-no-member
+    _win32gui.SendMessage(arg_HWND, _win32con.WM_KEYUP, _vk, _create_LPARAM_KeyUp(_vk)) # pylint: disable=c-extension-no-member
 
 @typechecked
 def key_hold_SendMessage(arg_HWND: _HWND,
@@ -526,11 +534,11 @@ def mouse_left_doubleclick_SendMessage(arg_HWND: _HWND,
     _lparam = _win32api.MAKELONG(client_pos[0], client_pos[1]) # pylint: disable=c-extension-no-member
     _win32gui.SendMessage(arg_HWND, _win32con.WM_ACTIVATE, _win32con.WA_ACTIVE, 0) # pylint: disable=c-extension-no-member
     if arg_move_mouse:
-        _win32api.SendMessage(arg_HWND, _win32con.WM_MOUSEMOVE, 0, _lparam) # pylint: disable=c-extension-no-member
+        _win32gui.SendMessage(arg_HWND, _win32con.WM_MOUSEMOVE, 0, _lparam) # pylint: disable=c-extension-no-member
     # The following line must be here, see the docstring for more info
     mouse_left_click_SendMessage(arg_HWND=arg_HWND, arg_pos=arg_pos, arg_move_mouse=arg_move_mouse, arg_debug=arg_debug)
-    _win32api.SendMessage(arg_HWND, _win32con.WM_LBUTTONDBLCLK, _win32con.MK_LBUTTON, _lparam) # pylint: disable=c-extension-no-member
-    _win32api.SendMessage(arg_HWND, _win32con.WM_LBUTTONUP, _win32con.MK_LBUTTON, _lparam) # pylint: disable=c-extension-no-member
+    _win32gui.SendMessage(arg_HWND, _win32con.WM_LBUTTONDBLCLK, _win32con.MK_LBUTTON, _lparam) # pylint: disable=c-extension-no-member
+    _win32gui.SendMessage(arg_HWND, _win32con.WM_LBUTTONUP, _win32con.MK_LBUTTON, _lparam) # pylint: disable=c-extension-no-member
 
 @typechecked
 def mouse_right_down_SendMessage(arg_HWND: _HWND,
@@ -565,7 +573,7 @@ def mouse_move_SendMessage(arg_HWND: _HWND,
     client_pos = _win32gui.ScreenToClient(arg_HWND, arg_pos) # pylint: disable=c-extension-no-member
     _lparam = _win32api.MAKELONG(client_pos[0], client_pos[1]) # pylint: disable=c-extension-no-member
     _win32gui.SendMessage(arg_HWND, _win32con.WM_ACTIVATE, _win32con.WA_ACTIVE, 0) # pylint: disable=c-extension-no-member
-    _win32api.SendMessage(arg_HWND, _win32con.WM_MOUSEMOVE, 0, _lparam) # pylint: disable=c-extension-no-member
+    _win32gui.SendMessage(arg_HWND, _win32con.WM_MOUSEMOVE, 0, _lparam) # pylint: disable=c-extension-no-member
 
 @typechecked
 def mouse_left_drag_and_drop_SendMessage(arg_HWND: _HWND,
